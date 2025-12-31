@@ -64,6 +64,8 @@
         const db = firebase.firestore();
         const APP_ID = "class-officer-system";
         const TEACHER_EMAIL = "susi@st.tc.edu.tw";
+        // 模擬用的測試學生 Email
+        const MOCK_STUDENT_EMAIL = "student@test.com";
 
         const ROLE_ORDER = ["班長", "副班長", "風紀", "學藝", "設備", "體育", "衛生", "環保", "總務", "資訊", "輔導", "服務", "健康", "禮貌", "圖書", "腳踏車"];
         const ROLE_COLORS = ["text-indigo-700", "text-emerald-700", "text-amber-700", "text-rose-700", "text-violet-700", "text-cyan-700", "text-orange-700"];
@@ -172,16 +174,26 @@
         // 3. 功能頁面模組 (Functional Modules)
         // ==========================================
 
-        // [Module] Login View
-        const LoginView = ({ onGoogleLogin }) => (
-            <div className="flex flex-col md:flex-row gap-12 justify-center mt-12 animate-in fade-in">
-                <div className="login-card flex-1 bg-white p-12 rounded-[4rem] shadow-xl border-t-8 border-[#C7CEEA] text-center">
+        // [Module] Login View (With Mock Options)
+        const LoginView = ({ onGoogleLogin, onMockLogin }) => (
+            <div className="flex flex-col md:flex-row gap-12 justify-center mt-12 animate-in fade-in max-w-4xl mx-auto">
+                <div className="login-card flex-1 bg-white p-12 rounded-[4rem] shadow-xl border-t-8 border-[#C7CEEA] text-center flex flex-col">
                     <div className="text-7xl mb-8">🎒</div><h2 className="text-4xl font-black text-slate-800 mb-6">學生入口</h2>
-                    <button onClick={() => onGoogleLogin('student')} className="w-full bg-[#C7CEEA] text-white py-6 rounded-3xl font-black shadow-lg text-xl">學生登入</button>
+                    <button onClick={() => onGoogleLogin('student')} className="w-full bg-[#C7CEEA] text-white py-6 rounded-3xl font-black shadow-lg text-xl mb-4">學生登入</button>
+                    
+                    <div className="mt-auto pt-4 border-t border-slate-100">
+                        <p className="text-xs text-slate-400 mb-2">預覽環境無法使用 Google 登入？</p>
+                        <button onClick={() => onMockLogin('student')} className="text-indigo-400 underline text-sm font-bold hover:text-indigo-600">使用模擬學生身分登入</button>
+                    </div>
                 </div>
-                <div className="login-card flex-1 bg-white p-12 rounded-[4rem] shadow-xl border-t-8 border-[#B5EAD7] text-center">
+                <div className="login-card flex-1 bg-white p-12 rounded-[4rem] shadow-xl border-t-8 border-[#B5EAD7] text-center flex flex-col">
                     <div className="text-7xl mb-8 font-black">👩‍🏫</div><h2 className="text-4xl font-black text-slate-800 mb-6">教師入口</h2>
-                    <button onClick={() => onGoogleLogin('teacher')} className="w-full bg-[#B5EAD7] text-emerald-800 py-6 rounded-3xl font-black shadow-lg text-xl">教師管理</button>
+                    <button onClick={() => onGoogleLogin('teacher')} className="w-full bg-[#B5EAD7] text-emerald-800 py-6 rounded-3xl font-black shadow-lg text-xl mb-4">教師管理</button>
+                    
+                    <div className="mt-auto pt-4 border-t border-slate-100">
+                        <p className="text-xs text-slate-400 mb-2">預覽環境無法使用 Google 登入？</p>
+                        <button onClick={() => onMockLogin('teacher')} className="text-emerald-600 underline text-sm font-bold hover:text-emerald-800">使用模擬教師身分登入</button>
+                    </div>
                 </div>
             </div>
         );
@@ -409,6 +421,7 @@
             const [isActionLoading, setIsActionLoading] = useState(false);
             const [validationErrors, setValidationErrors] = useState([]); 
             const [refreshTick, setRefreshTick] = useState(0);
+            const [isSimulating, setIsSimulating] = useState(false);
 
             const [officers, setOfficers] = useState([]);
             const [userResponse, setUserResponse] = useState({ evaluations: {}, preferences: Array(16).fill(null) });
@@ -423,6 +436,9 @@
             // Auth Listener
             useEffect(() => {
                 const unsubscribe = auth.onAuthStateChanged(async (currentUser) => {
+                    // 如果正在模擬，忽略 Auth 狀態變化，以免被覆蓋
+                    if (isSimulating) return;
+
                     if (currentUser) {
                         setUser(currentUser);
                         if (currentUser.email === TEACHER_EMAIL) {
@@ -438,7 +454,7 @@
                     hideLoader();
                 });
                 return () => unsubscribe();
-            }, [loginIntent]);
+            }, [loginIntent, isSimulating]);
 
             // Data Listener: Officers List
             useEffect(() => {
@@ -462,6 +478,13 @@
 
             // Helper: Check Identity
             const checkStudentIdentity = async (currentUser) => {
+                // 特殊處理：模擬學生
+                if (currentUser.email === MOCK_STUDENT_EMAIL) {
+                    setUserData({ seatNo: "99", name: "測試生", email: MOCK_STUDENT_EMAIL });
+                    loadUserResponse(currentUser.uid);
+                    return;
+                }
+
                 try {
                     const snap = await db.collection('artifacts').doc(APP_ID).collection('public').doc('data').collection('member_list').get();
                     const list = snap.docs.map(d => d.data());
@@ -498,10 +521,32 @@
             const handleGoogleLogin = async (mode) => {
                 setLoginIntent(mode);
                 try { await auth.signInWithPopup(new firebase.auth.GoogleAuthProvider()); } 
-                catch (error) { setModal({ show: true, title: '登入失敗', message: '無法開啟登入視窗。', type: 'error' }); }
+                catch (error) { setModal({ show: true, title: '登入失敗', message: '無法開啟登入視窗。若您處於預覽環境，請改用下方的「模擬登入」功能。', type: 'error' }); }
             };
 
-            const handleLogout = () => { auth.signOut(); setStep('login'); setUserData(null); setLoginIntent(null); };
+            const handleMockLogin = (role) => {
+                setIsSimulating(true);
+                const mockUser = role === 'teacher' 
+                    ? { uid: 'mock-teacher-uid', email: TEACHER_EMAIL, displayName: '測試教師' }
+                    : { uid: 'mock-student-uid', email: MOCK_STUDENT_EMAIL, displayName: '測試學生' };
+                
+                setUser(mockUser);
+                setLoginIntent(role);
+                
+                if (role === 'teacher') {
+                    setStep('admin');
+                } else {
+                    checkStudentIdentity(mockUser);
+                }
+            };
+
+            const handleLogout = () => { 
+                auth.signOut(); 
+                setStep('login'); 
+                setUserData(null); 
+                setLoginIntent(null);
+                setIsSimulating(false); // 重置模擬狀態
+            };
 
             const handleEvalFinish = () => {
                 const unrated = officers.filter(o => userResponse.evaluations[o.seatNo] === undefined || userResponse.evaluations[o.seatNo] === null);
@@ -623,7 +668,7 @@
                     <Header user={user} userData={userData} step={step} setStep={setStep} handleLogout={handleLogout} />
 
                     <main className="max-w-6xl mx-auto p-4 mt-8 font-black">
-                        {step === 'login' && <LoginView onGoogleLogin={handleGoogleLogin} />}
+                        {step === 'login' && <LoginView onGoogleLogin={handleGoogleLogin} onMockLogin={handleMockLogin} />}
                         
                         {step === 'admin' && <AdminDashboard 
                             officers={officers} 
