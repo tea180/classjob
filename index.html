@@ -1,0 +1,664 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>班級幹部票選系統 v.91 (Modularized)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&display=swap');
+        body { font-family: 'Noto Sans TC', sans-serif; overflow-x: hidden; }
+        .login-card:hover { transform: translateY(-8px); transition: all 0.4s ease; }
+        .health-segment { transition: all 0.15s ease-out; white-space: nowrap; }
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+        .battery-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(8px, 1fr)); gap: 2px; width: 100%; }
+        .battery-cell { height: 12px; border-radius: 2px; }
+        
+        /* Loader Styles */
+        #static-loader { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: #FFFAF0; z-index: 9999; display: flex; flex-direction: column; align-items: center; justify-content: center; transition: opacity 0.4s ease-out; }
+        .spinner { width: 45px; height: 45px; border: 5px solid #CBD5E1; border-top-color: #8799E8; border-radius: 50%; animation: spin 0.8s linear infinite; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        .hidden-loader { opacity: 0; pointer-events: none; }
+        .error-row { border: 3px solid #ef4444 !important; background-color: #fef2f2 !important; box-shadow: 0 4px 12px rgba(239, 68, 68, 0.2) !important; }
+
+        /* Nav Styles */
+        .nav-item { position: relative; overflow: hidden; height: 100%; display: flex; align-items: center; justify-content: center; padding: 0 1.5rem; cursor: pointer; transition: color 0.3s ease; z-index: 10; font-weight: 900; }
+        .nav-bg { position: absolute; left: 0; bottom: -100%; width: 100%; height: 100%; transition: bottom 0.4s cubic-bezier(0.25, 1, 0.5, 1); z-index: -1; }
+        .nav-item:hover .nav-bg, .nav-item.active .nav-bg { bottom: 0; }
+        .nav-item:hover, .nav-item.active { color: #1e293b; }
+    </style>
+</head>
+<body class="bg-[#FFFAF0] text-slate-700 font-black">
+    
+    <div id="static-loader">
+        <div class="spinner"></div>
+        <div class="mt-4 text-[#8799E8] font-black text-xl animate-pulse">系統初始化中...</div>
+    </div>
+
+    <div id="root"></div>
+
+    <!-- Libraries -->
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+
+    <script type="text/babel">
+        // ==========================================
+        // 1. 全域設定與常數 (Global Constants)
+        // ==========================================
+        const firebaseConfig = {
+            apiKey: "AIzaSyDPue2Ac6K2QyZ3PI5gBAA9GcleCAlisNU",
+            authDomain: "classjob-1d8bb.firebaseapp.com",
+            projectId: "classjob-1d8bb",
+            storageBucket: "classjob-1d8bb.firebasestorage.app",
+            messagingSenderId: "646890596544",
+            appId: "1:646890596544:web:07400ac216069e2531e525"
+        };
+
+        if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
+        const auth = firebase.auth();
+        const db = firebase.firestore();
+        const APP_ID = "class-officer-system";
+        const TEACHER_EMAIL = "susi@st.tc.edu.tw";
+
+        const ROLE_ORDER = ["班長", "副班長", "風紀", "學藝", "設備", "體育", "衛生", "環保", "總務", "資訊", "輔導", "服務", "健康", "禮貌", "圖書", "腳踏車"];
+        const ROLE_COLORS = ["text-indigo-700", "text-emerald-700", "text-amber-700", "text-rose-700", "text-violet-700", "text-cyan-700", "text-orange-700"];
+        
+        const RATING_OPTIONS = [
+            { val: -1, line1: "表現不好", line2: "邊做邊玩", color: "bg-rose-300", activeColor: "bg-rose-700", textColor: "text-rose-950", activeText: "text-white" },
+            { val: 0, line1: "被動", line2: "要做不做", color: "bg-orange-300", activeColor: "bg-orange-700", textColor: "text-orange-950", activeText: "text-white" },
+            { val: 1, line1: "偶爾做", line2: "比沒做好點", color: "bg-amber-300", activeColor: "bg-amber-700", textColor: "text-amber-950", activeText: "text-white" },
+            { val: 2, line1: "常常做", line2: "大部份完成", color: "bg-emerald-300", activeColor: "bg-emerald-700", textColor: "text-emerald-950", activeText: "text-white" },
+            { val: 3, line1: "主動積極", line2: "都按時完成", color: "bg-indigo-300", activeColor: "bg-indigo-800", textColor: "text-indigo-950", activeText: "text-white" }
+        ];
+
+        // Utils
+        const normalizeRole = (roleName) => roleName ? roleName.toString().replace(/\d+$/, '').trim() : "";
+        const hideLoader = () => { const loader = document.getElementById('static-loader'); if(loader) loader.classList.add('hidden-loader'); };
+        const { useState, useEffect, useMemo } = React;
+
+        // ==========================================
+        // 2. 共用 UI 元件 (Shared UI Components)
+        // ==========================================
+        
+        // 模態視窗 (Alert/Confirm)
+        const Modal = ({ show, title, message, type, onConfirm, onClose }) => {
+            if (!show) return null;
+            return (
+                <div className="fixed inset-0 bg-black/20 backdrop-blur-sm flex items-center justify-center z-[100] p-4 text-center font-black">
+                    <div className="bg-white rounded-[2.5rem] shadow-2xl max-w-sm w-full border-4 border-white p-6">
+                        <h3 className={`text-2xl mb-2 ${type === 'error' ? 'text-rose-500' : 'text-[#8799E8]'}`}>{title}</h3>
+                        <p className="text-slate-500 mb-6">{message}</p>
+                        <div className="flex gap-3">
+                            {onConfirm ? (
+                                <>
+                                    <button onClick={onClose} className="flex-1 py-3 bg-slate-100 rounded-2xl text-slate-400">取消</button>
+                                    <button onClick={onConfirm} className="flex-1 py-3 bg-[#B5EAD7] text-emerald-800 rounded-2xl">確定</button>
+                                </>
+                            ) : (
+                                <button onClick={onClose} className="w-full py-3 bg-[#C7CEEA] text-white rounded-2xl font-black">知道了</button>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        // 敘獎建議名單 Modal
+        const AwardModal = ({ show, onClose, awardList }) => {
+            if (!show) return null;
+            
+            const handleCopy = () => {
+                const t = awardList.map(a => `${a.seatNo}\t${a.name}\t${a.awardDesc}`).join("\n");
+                const el = document.createElement("textarea"); el.value = t; document.body.appendChild(el); el.select();
+                document.execCommand('copy'); document.body.removeChild(el); alert("已複製到剪貼簿！");
+            };
+
+            return (
+                <div className="fixed inset-0 bg-black/40 backdrop-blur-md flex items-center justify-center z-[100] p-4 font-black text-black">
+                    <div className="bg-white rounded-[3rem] shadow-2xl max-w-3xl w-full border-4 border-white max-h-[85vh] flex flex-col">
+                        <div className="p-8 text-center border-b font-black"><h3 className="text-3xl font-black text-indigo-700">🏅 敘獎建議名單</h3></div>
+                        <div className="flex-1 overflow-y-auto p-8 no-scrollbar">
+                            {awardList.length > 0 ? (
+                                <table className="w-full text-left text-sm font-bold border-separate border-spacing-y-2">
+                                    <thead><tr className="text-slate-400"><th>座號</th><th>獎勵</th><th>現任職務</th><th>姓名</th></tr></thead>
+                                    <tbody>
+                                        {awardList.map((a, i) => (
+                                            <tr key={i} className="bg-[#FFFAF0] rounded-xl transition-all">
+                                                <td className="py-3 px-2 font-black">{a.seatNo}</td><td className="text-rose-500">{a.awardDesc}</td><td>{a.role}</td><td className="text-indigo-600">{a.name}</td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            ) : <div className="text-center py-20 text-slate-300 font-black italic">目前無人符合標準 (+1 ~ +3)</div>}
+                        </div>
+                        <div className="p-8 bg-slate-50 rounded-b-[3rem] flex justify-between gap-4">
+                            <button onClick={onClose} className="flex-1 py-5 bg-white text-slate-400 font-black rounded-[2rem] border-2">返回</button>
+                            <button onClick={handleCopy} className="flex-[2] py-5 bg-[#B5EAD7] text-emerald-800 font-black rounded-[2rem] shadow-xl font-black">📋 複製資料貼回 Excel</button>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        // Header Component
+        const Header = ({ user, userData, step, setStep, handleLogout }) => (
+            <header className="bg-white/80 backdrop-blur-md sticky top-0 z-50 border-b border-white h-24 sm:h-20 shadow-sm overflow-hidden">
+                <div className="max-w-[1400px] mx-auto h-full flex items-center px-6 relative">
+                    <h1 className="text-xl sm:text-2xl font-black text-[#8799E8] shrink-0">❤️ 班級幹部票選系統 <span className="text-xs opacity-40 ml-1">v.91</span></h1>
+                    {user && step !== 'login' && step !== 'admin' && step !== 'unauthorized' && (
+                        <nav className="absolute left-1/2 -translate-x-1/2 flex h-full items-center">
+                            <div onClick={() => setStep('eval')} className={`nav-item text-xs sm:text-sm ${step === 'eval' ? 'active' : 'text-slate-400'}`}><div className="nav-bg bg-[#C7CEEA]"></div><span className="relative z-10">現任幹部評分</span></div>
+                            <div onClick={() => setStep('pref')} className={`nav-item text-xs sm:text-sm ${step === 'pref' ? 'active' : 'text-slate-400'}`}><div className="nav-bg bg-[#B5EAD7]"></div><span className="relative z-10">下任幹部志願選填</span></div>
+                            <div onClick={() => setStep('summary')} className={`nav-item text-xs sm:text-sm ${step === 'summary' ? 'active' : 'text-slate-400'}`}><div className="nav-bg bg-[#FFDAC1]"></div><span className="relative z-10">查看選填結果</span></div>
+                        </nav>
+                    )}
+                    <div className="flex-1"></div>
+                    {user && (
+                        <div className="flex items-center gap-4 shrink-0">
+                            {userData && <span className="hidden lg:block bg-lime-100 text-lime-700 px-4 py-1.5 rounded-full text-xs font-black">{userData.seatNo} 號 {userData.name}</span>}
+                            <button onClick={handleLogout} className="text-slate-400 font-bold px-3 py-1 border rounded-full hover:bg-slate-50 text-xs">登出</button>
+                        </div>
+                    )}
+                </div>
+            </header>
+        );
+
+        // ==========================================
+        // 3. 功能頁面模組 (Functional Modules)
+        // ==========================================
+
+        // [Module] Login View
+        const LoginView = ({ onGoogleLogin }) => (
+            <div className="flex flex-col md:flex-row gap-12 justify-center mt-12 animate-in fade-in">
+                <div className="login-card flex-1 bg-white p-12 rounded-[4rem] shadow-xl border-t-8 border-[#C7CEEA] text-center">
+                    <div className="text-7xl mb-8">🎒</div><h2 className="text-4xl font-black text-slate-800 mb-6">學生入口</h2>
+                    <button onClick={() => onGoogleLogin('student')} className="w-full bg-[#C7CEEA] text-white py-6 rounded-3xl font-black shadow-lg text-xl">學生登入</button>
+                </div>
+                <div className="login-card flex-1 bg-white p-12 rounded-[4rem] shadow-xl border-t-8 border-[#B5EAD7] text-center">
+                    <div className="text-7xl mb-8 font-black">👩‍🏫</div><h2 className="text-4xl font-black text-slate-800 mb-6">教師入口</h2>
+                    <button onClick={() => onGoogleLogin('teacher')} className="w-full bg-[#B5EAD7] text-emerald-800 py-6 rounded-3xl font-black shadow-lg text-xl">教師管理</button>
+                </div>
+            </div>
+        );
+
+        // [Module] Student Evaluation View
+        const StudentEvalView = ({ officersSorted, userResponse, onUpdateResponse, validationErrors, onFinish }) => (
+            <div className="animate-in slide-in-from-bottom-6 duration-500 font-black text-black">
+                <div className="bg-white p-6 sm:p-10 rounded-[4rem] border-4 border-white mb-8 shadow-sm">
+                    <h2 className="text-3xl font-black mb-10 text-center text-[#8799E8]">⭐ 現任幹部評分</h2>
+                    <div className="space-y-6">
+                        {officersSorted.map((off) => {
+                            const roleColorClass = ROLE_COLORS[ROLE_ORDER.indexOf(normalizeRole(off.role)) % ROLE_COLORS.length];
+                            return (
+                                <div key={off.id} className={`flex flex-col lg:flex-row gap-0 p-4 rounded-[2.5rem] border-2 transition-all duration-300 ${validationErrors.includes(off.seatNo) ? 'error-row' : 'border-slate-50 hover:bg-white'}`}>
+                                    <div className="flex flex-col justify-center lg:w-44 shrink-0 pl-2">
+                                        <div className={`text-3xl font-black leading-tight mb-1 ${roleColorClass}`}>{off.role}</div>
+                                        <div className="text-sm font-bold text-slate-400">#{off.seatNo} {off.name}</div>
+                                    </div>
+                                    <div className="flex-1 mt-4 lg:mt-0">
+                                        <div className="flex items-stretch rounded-2xl border-2 border-white shadow-xl min-h-[75px] bg-white overflow-hidden">
+                                            {RATING_OPTIONS.map((opt) => (
+                                                <button key={opt.val} 
+                                                    onClick={() => onUpdateResponse(off.seatNo, opt.val)}
+                                                    className={`health-segment flex-1 flex flex-col items-center justify-center px-4 border-r last:border-r-0 text-center leading-tight font-black py-1 ${userResponse.evaluations[off.seatNo] === opt.val ? `${opt.activeColor} ${opt.activeText} z-10 shadow-inner scale-[1.02]` : `${opt.color} ${opt.textColor} opacity-90 hover:opacity-100`}`}>
+                                                    <span className="text-lg font-black">{opt.line1}</span><span className="text-sm font-bold opacity-80">{opt.line2}</span>
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </div>
+                                </div>
+                            );
+                        })}
+                    </div>
+                </div>
+                <div className="flex justify-end mb-20"><button onClick={onFinish} className="bg-[#B5EAD7] text-emerald-800 font-black py-6 px-20 rounded-full shadow-2xl border-4 border-white text-2xl hover:scale-105 active:scale-95 transition-all">完成評分</button></div>
+            </div>
+        );
+
+        // [Module] Student Preference View (Contains Drag & Drop Logic)
+        const StudentPrefView = ({ availableRoles, preferences, onUpdatePreferences, onFinish }) => {
+            const [draggedItem, setDraggedItem] = useState(null);
+
+            const handleDrop = (e, type, index) => {
+                e.preventDefault();
+                const newPrefs = [...preferences];
+                if (type === 'slot') {
+                    if (draggedItem.type === 'pool') {
+                        if (!newPrefs.includes(draggedItem.value)) newPrefs[index] = draggedItem.value;
+                    } else if (draggedItem.type === 'slot') {
+                        const temp = newPrefs[index];
+                        newPrefs[index] = draggedItem.value;
+                        newPrefs[draggedItem.index] = temp;
+                    }
+                } else if (type === 'pool' && draggedItem.type === 'slot') {
+                    newPrefs[draggedItem.index] = null;
+                }
+                onUpdatePreferences(newPrefs);
+                setDraggedItem(null);
+            };
+
+            return (
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start animate-in fade-in duration-500 font-black text-black">
+                    <div className="lg:col-span-4 bg-white p-6 rounded-[4rem] border-4 lg:sticky lg:top-28 shadow-xl text-center">
+                        <h3 className="text-xl font-black text-[#8799E8] mb-6">可選職務</h3>
+                        <div className="flex flex-wrap gap-3 p-6 bg-[#FFFAF0] rounded-[2.5rem] min-h-[200px] border-2 border-dashed" onDragOver={(e)=>e.preventDefault()} onDrop={(e)=>handleDrop(e,'pool')}>
+                            {availableRoles.map(r => (<div key={r} draggable onDragStart={(e)=>setDraggedItem({type:'pool',value:r})} className="bg-white border-2 border-[#C7CEEA] px-6 py-3 rounded-2xl font-black text-base text-[#8799E8] shadow-sm flex items-center gap-2 cursor-grab">⠿ {r}</div>))}
+                        </div>
+                    </div>
+                    <div className="lg:col-span-8 bg-white p-12 rounded-[4rem] border-4 shadow-xl text-center">
+                        <h3 className="text-2xl font-black mb-8 text-slate-800">下任幹部志願選填 (前 5 名必填)</h3>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+                            {preferences.map((p, i) => (
+                                <div key={i} onDragOver={(e)=>e.preventDefault()} onDrop={(e)=>handleDrop(e,'slot',i)} className={`flex items-center gap-5 p-6 rounded-[2.5rem] border-2 transition-all ${i < 5 ? 'bg-lime-50/50 border-lime-200 shadow-sm' : 'bg-[#FFFAF0] border-transparent'}`}>
+                                    <div className={`w-10 h-10 rounded-full flex items-center justify-center font-black text-white shrink-0 shadow-lg ${i < 5 ? 'bg-emerald-500' : 'bg-indigo-400'}`}>{i + 1}</div>
+                                    <div className="flex-1 h-[60px] flex items-center overflow-hidden">
+                                        {p ? <div draggable onDragStart={(e)=>setDraggedItem({type:'slot',value:p,index:i})} className="bg-white border-2 border-[#C7CEEA] px-6 py-4 rounded-[1.5rem] font-black text-xl text-[#8799E8] w-full flex justify-between items-center shadow-md"><span>{p}</span><span className="opacity-20">⠿</span></div> : <span className="text-slate-300 font-bold italic ml-3">尚未選入</span>}
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                    <div className="lg:col-span-12 flex justify-end mt-12 mb-20 items-center px-4"><button onClick={onFinish} className="bg-[#B5EAD7] text-emerald-800 font-black py-6 px-20 rounded-full shadow-2xl border-4 border-white text-2xl hover:scale-105 active:scale-95 transition-all">送出志願</button></div>
+                </div>
+            );
+        };
+
+        // [Module] Student Summary View
+        const StudentSummaryView = ({ statistics, refreshTick }) => (
+            <div className="bg-white p-12 rounded-[5rem] border-4 border-white shadow-2xl text-center relative animate-in zoom-in duration-700 text-black font-black">
+                <div className="absolute top-8 right-10 flex items-center gap-2 uppercase text-[10px] text-slate-300"><div className={`w-2 h-2 rounded-full ${refreshTick % 2 === 0 ? 'bg-emerald-400 animate-ping' : 'bg-emerald-200'}`}></div>Live Updates</div>
+                <h2 className="text-5xl font-black text-slate-800 mb-8 tracking-tighter">選填結果✨</h2>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-12">
+                    <div className="bg-rose-50 p-8 rounded-[3rem] border-2 border-rose-100"><h4 className="text-rose-400 font-black text-lg mb-2">未完成評分</h4><div className="text-5xl font-black text-rose-600">{statistics.incEval}<span className="text-xl ml-2 opacity-50">人</span></div></div>
+                    <div className="bg-indigo-50 p-8 rounded-[3rem] border-2 border-indigo-100"><h4 className="text-indigo-400 font-black text-lg mb-2">未完成志願</h4><div className="text-5xl font-black text-indigo-600">{statistics.incPref}<span className="text-xl ml-2 opacity-50">人</span></div></div>
+                </div>
+                <div className="text-left space-y-8">
+                    <div className="flex justify-between border-b pb-4 items-end">
+                        <h3 className="text-xl font-black text-slate-700">各職務前三志願統計</h3>
+                        <div className="flex gap-4 text-[10px] font-black"><div className="flex items-center gap-1"><div className="w-3 h-3 bg-rose-400 rounded-sm"></div> 1st</div><div className="flex items-center gap-1"><div className="w-3 h-3 bg-amber-400 rounded-sm"></div> 2nd</div><div className="flex items-center gap-1"><div className="w-3 h-3 bg-indigo-400 rounded-sm"></div> 3rd</div></div>
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-8">
+                        {ROLE_ORDER.map(role => (
+                            <div key={role} className="flex flex-col gap-2">
+                                <div className="flex justify-between items-end px-1"><span className="font-black text-slate-600 text-lg">{role}</span><span className="text-[10px] text-slate-300">總計 {(statistics.roleStats[role]?.r1 || 0) + (statistics.roleStats[role]?.r2 || 0) + (statistics.roleStats[role]?.r3 || 0)}</span></div>
+                                <div className="battery-grid bg-slate-100 p-1.5 rounded-lg border border-slate-200/50">
+                                    {Array.from({length: statistics.roleStats[role]?.r1 || 0}).map((_, i) => <div key={`r1-${i}`} className="battery-cell bg-rose-400 shadow-sm"></div>)}
+                                    {Array.from({length: statistics.roleStats[role]?.r2 || 0}).map((_, i) => <div key={`r2-${i}`} className="battery-cell bg-amber-400 shadow-sm"></div>)}
+                                    {Array.from({length: statistics.roleStats[role]?.r3 || 0}).map((_, i) => <div key={`r3-${i}`} className="battery-cell bg-indigo-400 shadow-sm"></div>)}
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            </div>
+        );
+
+        // [Module] Admin Dashboard & Sub-modules
+        const AdminDashboard = ({ 
+            officers, allStudentResponses, ratingStats, volunteerStats, 
+            onGoToSimulate, onSaveList, 
+        }) => {
+            const [adminTab, setAdminTab] = useState('list');
+            const [isAdminMode, setIsAdminMode] = useState('manual');
+            const [editList, setEditList] = useState([]);
+            const [pasteContent, setPasteContent] = useState('');
+            const [topNFilter, setTopNFilter] = useState(3);
+            const [showAwardModal, setShowAwardModal] = useState(false);
+
+            // Init edit list
+            useEffect(() => {
+                if (editList.length === 0 && officers.length > 0) {
+                    setEditList(officers.map(item => ({ seatNo: item.seatNo, role: item.originalRole || item.role, name: item.name, email: item.email || "" })));
+                }
+            }, [officers.length]);
+
+            const awardList = useMemo(() => {
+                const list = [];
+                Object.values(ratingStats).forEach((info) => {
+                    const counts = info.counts;
+                    let maxVotes = 0, modeVal = null;
+                    ["3", "2", "1", "0", "-1"].forEach(val => {
+                        if (counts[val] > maxVotes) { maxVotes = counts[val]; modeVal = Number(val); }
+                    });
+                    if (maxVotes > 0 && modeVal !== null && modeVal >= 1) {
+                        let desc = modeVal === 1 ? "嘉獎 1 次" : modeVal === 2 ? "嘉獎 2 次" : "小功 1 次";
+                        list.push({ seatNo: info.seatNo || "??", awardDesc: desc, role: info.role, name: info.name });
+                    }
+                });
+                return list;
+            }, [ratingStats]);
+
+            return (
+                <div className="space-y-6 animate-in fade-in">
+                    <AwardModal show={showAwardModal} onClose={()=>setShowAwardModal(false)} awardList={awardList} />
+                    
+                    <div className="flex flex-wrap gap-2 items-center">
+                        {['list', 'progress', 'ratings', 'volunteers'].map(t => (
+                            <button key={t} onClick={() => { if(t === 'list') setIsAdminMode('manual'); setAdminTab(t); }} className={`px-6 py-3 rounded-2xl font-black text-sm transition ${adminTab === t ? 'bg-[#C7CEEA] text-white shadow-md' : 'bg-white text-slate-400 hover:bg-slate-50'}`}>{t === 'list' ? '名單設定' : t === 'progress' ? '填答進度' : t === 'ratings' ? '評分統計' : '志願統計'}</button>
+                        ))}
+                        <button onClick={onGoToSimulate} className="ml-auto px-6 py-3 rounded-2xl font-black text-sm bg-orange-100 text-orange-600 border-2 border-white shadow-sm hover:scale-105 active:scale-95 transition-all">模擬填答指導 →</button>
+                    </div>
+
+                    <div className="bg-white p-8 rounded-[4rem] border-4 border-white shadow-sm min-h-[400px]">
+                        {/* Tab 1: List Management */}
+                        {adminTab === 'list' && (
+                            <div className="font-black text-black">
+                                <div className="flex justify-between items-center mb-6 font-black"><h3 className="text-2xl font-black">名單管理</h3><button onClick={() => setIsAdminMode(isAdminMode==='manual'?'paste':'manual')} className="text-xs font-bold text-indigo-400 underline">{isAdminMode==='manual'?'切換匯入模式':'切換手動編輯'}</button></div>
+                                {isAdminMode === 'paste' ? <textarea value={pasteContent} onChange={(e)=>setPasteContent(e.target.value)} className="w-full h-48 bg-[#FFFAF0] rounded-3xl p-6 font-bold outline-none mb-4 border-2 border-transparent focus:border-[#C7CEEA] text-black" placeholder="格式：座號 職務 姓名" /> : (
+                                    <div className="space-y-2 font-black">{editList.map((row, idx) => (<div key={idx} className="flex gap-2 items-center font-black"><input type="number" value={row.seatNo} onChange={(e)=>{const n=[...editList]; n[idx].seatNo=e.target.value; setEditList(n);}} className="w-16 p-3 bg-slate-50 rounded-2xl font-bold text-center text-sm" /><input type="text" value={row.role} onChange={(e)=>{const n=[...editList]; n[idx].role=e.target.value; setEditList(n);}} className="flex-1 p-3 bg-slate-50 rounded-2xl font-bold text-sm" /><input type="text" value={row.name} onChange={(e)=>{const n=[...editList]; n[idx].name=e.target.value; setEditList(n);}} className="flex-1 p-3 bg-slate-50 rounded-2xl font-bold text-sm" /><input type="text" value={row.email} onChange={(e)=>{const n=[...editList]; n[idx].email=e.target.value; setEditList(n);}} className="flex-[1.5] p-3 bg-slate-50 rounded-2xl font-bold text-sm" placeholder="Email" /><button onClick={()=>setEditList(editList.filter((_,i)=>i!==idx))} className="text-rose-300 font-black px-3 text-xl">×</button></div>))}<button onClick={()=>setEditList([...editList,{seatNo:'',role:'',name:'',email:''}])} className="text-xs font-bold text-indigo-400 mt-2 p-2 font-black"> + 增加欄位</button></div>
+                                )}
+                                <button onClick={() => onSaveList(isAdminMode, pasteContent, editList, setEditList, setAdminTab, setIsAdminMode)} className="w-full bg-[#B5EAD7] text-emerald-800 py-5 rounded-3xl font-black mt-6 shadow-lg active:scale-95 transition-all">儲存並重整系統</button>
+                            </div>
+                        )}
+                        
+                        {/* Tab 2: Progress */}
+                        {adminTab === 'progress' && (
+                            <div className="overflow-x-auto"><table className="w-full text-left font-black border-separate border-spacing-y-2"><thead><tr className="text-slate-400 text-xs"><th>座號</th><th>姓名</th><th className="text-center font-black">狀態</th><th className="text-right pr-4 font-black">最後同步</th></tr></thead><tbody>
+                                {officers.map(s => {
+                                    const r = allStudentResponses.find(res => String(res.seatNo) === String(s.seatNo));
+                                    const hasEval = r && Object.keys(r.evaluations || {}).length >= officers.length;
+                                    const hasPref = r && r.preferences?.filter(p=>p).length >= 5;
+                                    return (<tr key={s.id} className="bg-slate-50/50 rounded-2xl font-black"><td className="py-4 pl-4">{s.seatNo}</td><td>{s.name}</td><td><div className="flex gap-2 justify-center"><div className={`px-5 py-2 rounded-2xl text-[10px] font-black ${hasEval ? 'bg-emerald-600 text-white shadow-sm' : 'bg-slate-200'}`}>評分</div><div className={`px-5 py-2 rounded-2xl text-[10px] font-black ${hasPref ? 'bg-emerald-600 text-white shadow-sm' : 'bg-slate-200'}`}>志願</div></div></td><td className="py-4 text-right pr-4 text-[10px] text-slate-300">{r?.lastUpdated ? new Date(r.lastUpdated).toLocaleTimeString() : '-'}</td></tr>);
+                                })}
+                            </tbody></table></div>
+                        )}
+
+                        {/* Tab 3: Ratings */}
+                        {adminTab === 'ratings' && (
+                            <div className="space-y-6">
+                                <div className="flex justify-end mb-4"><button onClick={() => setShowAwardModal(true)} className="px-8 py-3 bg-rose-500 text-white rounded-2xl shadow-lg font-black">🎖️ 查看敘獎建議名單</button></div>
+                                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 text-black">
+                                    {officers.map(off => (<div key={off.id} className="bg-[#FFFAF0] p-6 rounded-[2.5rem] border-2 shadow-sm"><div className="flex items-center gap-2 mb-4"><span className="bg-[#C7CEEA] text-white text-[10px] px-3 py-1 rounded-full font-black">{off.seatNo}</span><span className="text-lg font-black">{off.name}</span> <span className="text-xs text-slate-400">({off.role})</span></div><div className="grid grid-cols-5 gap-1">{RATING_OPTIONS.map(opt => (<div key={opt.val} className={`p-2 rounded-xl flex flex-col items-center border border-white ${opt.color} font-black`}><span className="text-xl">{ratingStats[String(off.seatNo)]?.counts[String(opt.val)] || 0}</span></div>))}</div></div>))}
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Tab 4: Volunteers */}
+                        {adminTab === 'volunteers' && (
+                            <div className="space-y-8 animate-in fade-in font-black text-black">
+                                <div className="flex flex-col sm:flex-row justify-between items-center bg-[#FFFAF0] p-6 rounded-[2.5rem] border-2 gap-4">
+                                    <div><h4 className="font-black text-lg">志願統計累計篩選</h4><p className="text-xs text-slate-400 font-bold">顯示前 {topNFilter} 志願人選</p></div>
+                                    <div className="flex gap-2">{[1, 2, 3, 4, 5].map(rank => (<button key={rank} onClick={() => setTopNFilter(rank)} className={`w-12 h-12 rounded-2xl font-black transition-all ${topNFilter === rank ? 'bg-indigo-500 text-white scale-110 shadow-lg' : 'bg-white text-slate-300 border'}`}>{rank}</button>))}</div>
+                                </div>
+                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 text-black">
+                                    {ROLE_ORDER.map(role => {
+                                        const filtered = (volunteerStats[role] || []).filter(s => s.rank <= topNFilter).sort((a,b)=>a.rank-b.rank);
+                                        return (<div key={role} className="bg-slate-50 p-5 rounded-[2rem] border-2 min-h-[140px]"><div className="font-black mb-3 flex justify-between border-b pb-2 text-lg">{role}<span className="text-[10px] text-indigo-500 bg-white px-3 py-1 rounded-full">{filtered.length}</span></div><div className="flex flex-wrap gap-2">{filtered.map((s, i) => (<div key={i} className="bg-white px-3 py-1.5 rounded-xl text-xs font-black shadow-sm">#{s.seatNo} {s.name} <span className="text-indigo-600">({s.rank})</span></div>))}</div></div>);
+                                })}</div>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            );
+        };
+
+        // ==========================================
+        // 4. Main App Controller
+        // ==========================================
+        function App() {
+            const [user, setUser] = useState(null);
+            const [userData, setUserData] = useState(null);
+            const [step, setStep] = useState('login'); 
+            const [loginIntent, setLoginIntent] = useState(null); 
+            const [modal, setModal] = useState({ show: false, title: '', message: '', type: 'info', onConfirm: null });
+            const [isActionLoading, setIsActionLoading] = useState(false);
+            const [validationErrors, setValidationErrors] = useState([]); 
+            const [refreshTick, setRefreshTick] = useState(0);
+
+            const [officers, setOfficers] = useState([]);
+            const [userResponse, setUserResponse] = useState({ evaluations: {}, preferences: Array(16).fill(null) });
+            const [allStudentResponses, setAllStudentResponses] = useState([]);
+
+            // 系統時鐘 Tick (用於 Summary 即時更新動畫)
+            useEffect(() => {
+                const interval = setInterval(() => setRefreshTick(p => p + 1), 10000);
+                return () => clearInterval(interval);
+            }, []);
+
+            // Auth Listener
+            useEffect(() => {
+                const unsubscribe = auth.onAuthStateChanged(async (currentUser) => {
+                    if (currentUser) {
+                        setUser(currentUser);
+                        if (currentUser.email === TEACHER_EMAIL) {
+                            if (loginIntent === 'teacher' || step === 'admin') setStep('admin');
+                            else await checkStudentIdentity(currentUser);
+                        } else {
+                            await checkStudentIdentity(currentUser);
+                        }
+                    } else {
+                        setUser(null);
+                        setStep('login');
+                    }
+                    hideLoader();
+                });
+                return () => unsubscribe();
+            }, [loginIntent]);
+
+            // Data Listener: Officers List
+            useEffect(() => {
+                if (!user) return;
+                const unsub = db.collection('artifacts').doc(APP_ID).collection('public').doc('data').collection('member_list').onSnapshot((snapshot) => {
+                    const data = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+                    data.sort((a, b) => Number(a.seatNo) - Number(b.seatNo));
+                    setOfficers(data);
+                });
+                return () => unsub();
+            }, [user]);
+
+            // Data Listener: Student Responses
+            useEffect(() => {
+                if (!user) return;
+                const unsub = db.collection('artifacts').doc(APP_ID).collection('public').doc('data').collection('responses_summary').onSnapshot((snap) => {
+                    setAllStudentResponses(snap.docs.map(d => ({ uid: d.id, ...d.data() })));
+                });
+                return () => unsub();
+            }, [user, refreshTick]);
+
+            // Helper: Check Identity
+            const checkStudentIdentity = async (currentUser) => {
+                try {
+                    const snap = await db.collection('artifacts').doc(APP_ID).collection('public').doc('data').collection('member_list').get();
+                    const list = snap.docs.map(d => d.data());
+                    const matched = list.find(o => o.email === currentUser.email);
+                    if (matched) {
+                        setUserData(matched);
+                        loadUserResponse(currentUser.uid);
+                    } else if (currentUser.email !== TEACHER_EMAIL) {
+                        setStep('unauthorized');
+                    } else {
+                        setStep('admin');
+                    }
+                } catch (e) { console.error("Identity Check Error", e); hideLoader(); }
+            };
+
+            const loadUserResponse = (uid) => {
+                db.collection('artifacts').doc(APP_ID).collection('users').doc(uid).collection('data').doc('responses').onSnapshot((docSnap) => {
+                    if (docSnap.exists) {
+                        const data = docSnap.data();
+                        setUserResponse(prev => ({
+                            ...prev,
+                            evaluations: data.evaluations || {},
+                            preferences: data.preferences || Array(16).fill(null)
+                        }));
+                        if (data.isSubmitted && step === 'login') setStep('summary');
+                        else if (!data.isSubmitted && step === 'login') setStep('eval');
+                    } else if (step === 'login' || step === 'unauthorized') {
+                        setStep('eval');
+                    }
+                });
+            };
+
+            // Business Logic: Handlers
+            const handleGoogleLogin = async (mode) => {
+                setLoginIntent(mode);
+                try { await auth.signInWithPopup(new firebase.auth.GoogleAuthProvider()); } 
+                catch (error) { setModal({ show: true, title: '登入失敗', message: '無法開啟登入視窗。', type: 'error' }); }
+            };
+
+            const handleLogout = () => { auth.signOut(); setStep('login'); setUserData(null); setLoginIntent(null); };
+
+            const handleEvalFinish = () => {
+                const unrated = officers.filter(o => userResponse.evaluations[o.seatNo] === undefined || userResponse.evaluations[o.seatNo] === null);
+                if (unrated.length > 0) {
+                    setValidationErrors(unrated.map(o => o.seatNo));
+                    setModal({ show: true, title: '評分未完成', message: `還有 ${unrated.length} 位幹部尚未評分，請完成標示紅色的部分。`, type: 'error' });
+                    return;
+                }
+                setValidationErrors([]); setStep('pref');
+            };
+
+            const handlePrefFinish = () => {
+                const prefs = userResponse.preferences || [];
+                if (prefs.filter(p => p).length < 5) { setModal({ show: true, title: '數量不足', message: '請至少選填 5 名志願！', type: 'error' }); return; }
+                let lastIdx = -1;
+                for (let i = prefs.length - 1; i >= 0; i--) { if (prefs[i]) { lastIdx = i; break; } }
+                for (let i = 0; i <= lastIdx; i++) { if (!prefs[i]) { setModal({ show: true, title: '志願序中斷', message: '志願填寫不能留空位！', type: 'error' }); return; } }
+                setModal({ show: true, title: '確認儲存', message: "確定要送出目前的紀錄嗎？", type: 'info', onConfirm: saveToDB });
+            };
+
+            const saveToDB = async () => {
+                setIsActionLoading(true); setModal({show:false});
+                try {
+                    const submitName = userData ? userData.name : user.displayName;
+                    const submitSeat = userData ? userData.seatNo : "??";
+                    const data = { ...userResponse, isSubmitted: true, lastUpdated: new Date().toISOString(), name: submitName, seatNo: submitSeat };
+                    await db.collection('artifacts').doc(APP_ID).collection('users').doc(user.uid).collection('data').doc('responses').set(data, { merge: true });
+                    await db.collection('artifacts').doc(APP_ID).collection('public').doc('data').collection('responses_summary').doc(user.uid).set({
+                        seatNo: submitSeat, name: submitName, evaluations: userResponse.evaluations, preferences: userResponse.preferences, lastUpdated: new Date().toISOString()
+                    });
+                    setStep('summary');
+                } catch (e) { setModal({ show: true, title: '儲存失敗', message: '錯誤：' + e.message, type: 'error' }); } 
+                finally { setIsActionLoading(false); }
+            };
+
+            const handleAdminSaveList = async (mode, pasteContent, editList, setEditList, setAdminTab, setIsAdminMode) => {
+                if (user.email !== TEACHER_EMAIL) return;
+                setIsActionLoading(true);
+                try {
+                    const batch = db.batch();
+                    const col = db.collection('artifacts').doc(APP_ID).collection('public').doc('data').collection('member_list');
+                    const snap = await col.get(); snap.docs.forEach(d => batch.delete(d.ref));
+                    let listToSave = [];
+                    if (mode === 'paste') {
+                        const lines = pasteContent.split('\n').filter(l => l.trim());
+                        listToSave = lines.map(l => {
+                            const p = l.split(/\t|\s+/).filter(x => x); 
+                            if (p.length >= 4 && !isNaN(p[0])) return { seatNo: p[0], role: p[1], name: p[2], email: p[3] };
+                            return (p.length >= 3 && !isNaN(p[0])) ? { seatNo: p[0], role: p[1], name: p[2], email: "" } : null;
+                        }).filter(x => x);
+                    } else { listToSave = editList.filter(o => o.name && o.role && o.seatNo); }
+                    listToSave.forEach((o) => { 
+                        const cleanRole = normalizeRole(o.role); 
+                        batch.set(col.doc(), { seatNo: Number(o.seatNo), role: cleanRole, originalRole: o.role, name: o.name.trim(), email: (o.email || "").trim() }); 
+                    });
+                    await batch.commit(); alert("名單已更新！"); setEditList([]); setAdminTab('progress'); setIsAdminMode('manual');
+                } catch (err) { console.error(err); } finally { setIsActionLoading(false); }
+            };
+
+            // Calculated Props (Memoized)
+            const availableRoles = useMemo(() => ROLE_ORDER.filter(r => !(userResponse.preferences || []).includes(r)), [userResponse.preferences]);
+            
+            const officersSortedByRole = useMemo(() => [...officers].sort((a, b) => {
+                const idxA = ROLE_ORDER.indexOf(normalizeRole(a.role));
+                const idxB = ROLE_ORDER.indexOf(normalizeRole(b.role));
+                if (idxA !== idxB) return idxA - idxB;
+                return Number(a.seatNo) - Number(b.seatNo);
+            }), [officers]);
+
+            const ratingStats = useMemo(() => {
+                const stats = {};
+                officers.forEach(off => { stats[String(off.seatNo)] = { name: off.name, role: off.role, seatNo: off.seatNo, counts: { "-1": 0, "0": 0, "1": 0, "2": 0, "3": 0 } }; });
+                allStudentResponses.forEach(resp => {
+                    Object.entries(resp.evaluations || {}).forEach(([targetSeat, score]) => {
+                        if (stats[String(targetSeat)]) stats[String(targetSeat)].counts[String(score)]++;
+                    });
+                });
+                return stats;
+            }, [allStudentResponses, officers]);
+
+            const volunteerStats = useMemo(() => {
+                const stats = {}; ROLE_ORDER.forEach(role => stats[role] = []);
+                allStudentResponses.forEach(resp => {
+                    (resp.preferences || []).forEach((role, idx) => { if (role && stats[role] !== undefined) stats[role].push({ name: resp.name, seatNo: resp.seatNo, rank: idx + 1 }); });
+                });
+                return stats;
+            }, [allStudentResponses]);
+
+            const statistics = useMemo(() => {
+                let incEval = 0, incPref = 0;
+                const validOfficers = officers.filter(o => o.name && o.role);
+                validOfficers.forEach(s => {
+                    const r = allStudentResponses.find(res => String(res.seatNo) === String(s.seatNo));
+                    const ratedCount = r ? Object.keys(r.evaluations || {}).length : 0;
+                    if (!r || ratedCount < validOfficers.length) incEval++;
+                    if (!r || (r.preferences || []).filter(p => p).length < 5) incPref++;
+                });
+                const roleStats = {}; ROLE_ORDER.forEach(role => roleStats[role] = { r1: 0, r2: 0, r3: 0 });
+                allStudentResponses.forEach(r => {
+                    const p = r.preferences || [];
+                    if (p[0] && roleStats[p[0]]) roleStats[p[0]].r1++;
+                    if (p[1] && roleStats[p[1]]) roleStats[p[1]].r2++;
+                    if (p[2] && roleStats[p[2]]) roleStats[p[2]].r3++;
+                });
+                return { incEval, incPref, roleStats };
+            }, [allStudentResponses, officers]);
+
+            return (
+                <div className="min-h-screen pb-10 bg-[#FFFAF0] text-black">
+                    <Modal 
+                        show={modal.show} 
+                        title={modal.title} 
+                        message={modal.message} 
+                        type={modal.type} 
+                        onConfirm={modal.onConfirm} 
+                        onClose={() => setModal({ ...modal, show: false })} 
+                    />
+
+                    <Header user={user} userData={userData} step={step} setStep={setStep} handleLogout={handleLogout} />
+
+                    <main className="max-w-6xl mx-auto p-4 mt-8 font-black">
+                        {step === 'login' && <LoginView onGoogleLogin={handleGoogleLogin} />}
+                        
+                        {step === 'admin' && <AdminDashboard 
+                            officers={officers} 
+                            allStudentResponses={allStudentResponses} 
+                            ratingStats={ratingStats} 
+                            volunteerStats={volunteerStats}
+                            onGoToSimulate={() => setStep('eval')}
+                            onSaveList={handleAdminSaveList}
+                        />}
+                        
+                        {step === 'eval' && <StudentEvalView 
+                            officersSorted={officersSortedByRole}
+                            userResponse={userResponse}
+                            onUpdateResponse={(seatNo, val) => {
+                                setUserResponse(prev => ({...prev, evaluations: {...prev.evaluations, [seatNo]: val}}));
+                                setValidationErrors(prev => prev.filter(s => s !== seatNo));
+                            }}
+                            validationErrors={validationErrors}
+                            onFinish={handleEvalFinish}
+                        />}
+                        
+                        {step === 'pref' && <StudentPrefView 
+                            availableRoles={availableRoles}
+                            preferences={userResponse.preferences}
+                            onUpdatePreferences={(newPrefs) => setUserResponse({...userResponse, preferences: newPrefs})}
+                            onFinish={handlePrefFinish}
+                        />}
+                        
+                        {step === 'summary' && <StudentSummaryView statistics={statistics} refreshTick={refreshTick} />}
+                    </main>
+                </div>
+            );
+        }
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
