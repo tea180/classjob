@@ -139,7 +139,7 @@
                                 <span className="text-lg">🇬</span> Google 帳號登入
                             </button>
                             <button onClick={onChooseMock} className="w-full py-4 bg-[#B5EAD7] text-emerald-800 rounded-2xl font-black shadow-lg hover:brightness-105 active:scale-95 transition-all flex items-center justify-center gap-2">
-                                <span className="text-lg">🎭</span> 模擬身份進入 (預覽用)
+                                <span className="text-lg">🎭</span> 模擬身份進入 (測試用)
                             </button>
                         </div>
                         <button onClick={onClose} className="mt-6 text-slate-300 text-sm font-bold underline hover:text-slate-400">取消</button>
@@ -512,8 +512,8 @@
                     console.warn("Google Login Error:", error);
                     setModal({ 
                         show: true, 
-                        title: '登入受限', 
-                        message: '由於預覽環境的安全性限制，Google 登入視窗已被阻擋。您可以點擊下方按鈕切換至模擬身份繼續。', 
+                        title: '登入失敗', 
+                        message: `無法完成 Google 登入 (${error.code || error.message})。這可能是因為視窗被關閉或網域未授權。您可以使用「模擬身份」繼續測試。`, 
                         type: 'error',
                         actionButton: {
                             text: '切換至模擬身份進入',
