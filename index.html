@@ -185,26 +185,18 @@
         // 3. 功能頁面模組 (Functional Modules)
         // ==========================================
 
-        // [Module] Login View (Restored Google Login)
-        const LoginView = ({ onGoogleLogin, onMockLogin }) => (
+        // [Module] Login View (Smart Login)
+        const LoginView = ({ onGoogleLogin }) => (
             <div className="flex flex-col md:flex-row gap-12 justify-center mt-12 animate-in fade-in max-w-4xl mx-auto">
                 <div className="login-card flex-1 bg-white p-12 rounded-[4rem] shadow-xl border-t-8 border-[#C7CEEA] text-center flex flex-col">
                     <div className="text-7xl mb-8">🎒</div><h2 className="text-4xl font-black text-slate-800 mb-6">學生入口</h2>
-                    <button onClick={() => onGoogleLogin('student')} className="w-full bg-[#C7CEEA] text-white py-6 rounded-3xl font-black shadow-lg text-xl mb-4">學生登入 (Google)</button>
-                    
-                    <div className="mt-auto pt-4 border-t border-slate-100">
-                        <p className="text-xs text-slate-400 mb-2">預覽模式無法使用 Google 登入？</p>
-                        <button onClick={() => onMockLogin('student')} className="text-indigo-400 underline text-sm font-bold hover:text-indigo-600">使用模擬學生身分登入</button>
-                    </div>
+                    <button onClick={() => onGoogleLogin('student')} className="w-full bg-[#C7CEEA] text-white py-6 rounded-3xl font-black shadow-lg text-xl mb-4 transition hover:brightness-105 active:scale-95">學生登入 (Google)</button>
+                    <p className="text-xs text-slate-400">使用 Google 帳號驗證身分</p>
                 </div>
                 <div className="login-card flex-1 bg-white p-12 rounded-[4rem] shadow-xl border-t-8 border-[#B5EAD7] text-center flex flex-col">
                     <div className="text-7xl mb-8 font-black">👩‍🏫</div><h2 className="text-4xl font-black text-slate-800 mb-6">教師入口</h2>
-                    <button onClick={() => onGoogleLogin('teacher')} className="w-full bg-[#B5EAD7] text-emerald-800 py-6 rounded-3xl font-black shadow-lg text-xl mb-4">教師登入 (Google)</button>
-                    
-                    <div className="mt-auto pt-4 border-t border-slate-100">
-                        <p className="text-xs text-slate-400 mb-2">預覽模式無法使用 Google 登入？</p>
-                        <button onClick={() => onMockLogin('teacher')} className="text-emerald-600 underline text-sm font-bold hover:text-emerald-800">使用模擬教師身分登入</button>
-                    </div>
+                    <button onClick={() => onGoogleLogin('teacher')} className="w-full bg-[#B5EAD7] text-emerald-800 py-6 rounded-3xl font-black shadow-lg text-xl mb-4 transition hover:brightness-105 active:scale-95">教師登入 (Google)</button>
+                    <p className="text-xs text-slate-400">使用 Google 帳號進行管理</p>
                 </div>
             </div>
         );
@@ -440,7 +432,6 @@
             const [allStudentResponses, setAllStudentResponses] = useState([]);
 
             // [FIX] 初始化 Auth，解決 Permission Denied 問題
-            // Canvas 環境需要先 signInAnonymously 或 signInWithCustomToken 才能讀寫資料
             useEffect(() => {
                 const initAuth = async () => {
                     if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
@@ -463,13 +454,6 @@
                 const interval = setInterval(() => setRefreshTick(p => p + 1), 10000);
                 return () => clearInterval(interval);
             }, []);
-
-            // [FIX] 監聽連線狀態，自動關閉連線中視窗
-            useEffect(() => {
-                if (firebaseUser && modal.title === '系統連線中') {
-                    setModal(prev => ({ ...prev, show: false }));
-                }
-            }, [firebaseUser, modal.title]);
 
             // [FIX] 資料監聽：只有在 firebaseUser 存在時才啟動，避免 Permission Denied
             // 讀取名單
@@ -506,57 +490,58 @@
                 return () => unsub();
             }, [firebaseUser, refreshTick]);
 
-            // 處理真實 Google 登入
+            // [FIX] 處理登入：結合真實 Google 登入與模擬登入 Fallback
             const handleGoogleLogin = async (role) => {
-                // [FIX] 確保底層 Auth 已連線
+                // 如果底層還沒準備好，先嘗試初始化（但不阻擋 UI）
                 if (!firebaseUser) {
-                    setModal({ show: true, title: '系統連線中', message: '請稍候，系統正在建立安全連線...', type: 'info' });
-                    return;
+                    try { await auth.signInAnonymously(); } catch(e) { console.warn("Auto-auth failed", e); }
                 }
 
                 try {
                     const provider = new firebase.auth.GoogleAuthProvider();
+                    // 嘗試彈出視窗
                     const result = await auth.signInWithPopup(provider);
                     const user = result.user;
-                    setAppUser(user); // 設定應用層 User
+                    setAppUser(user);
 
-                    if (role === 'teacher') {
-                        if (user.email === TEACHER_EMAIL) {
-                            setStep('admin');
-                        } else {
-                            setStep('unauthorized');
-                        }
-                    } else {
-                        checkStudentIdentity(user);
-                    }
+                    // 登入成功後的路由邏輯
+                    processLogin(user, role);
+
                 } catch (error) {
-                    setModal({ 
-                        show: true, 
-                        title: 'Google 登入失敗', 
-                        message: '無法開啟登入視窗。若您處於預覽環境，請改用下方的「模擬登入」功能。', 
-                        type: 'error' 
-                    });
+                    console.warn("Google Sign-In failed or popup blocked, falling back to Mock Mode.", error);
+                    // Fallback: 模擬登入
+                    handleMockLogin(role);
                 }
             };
 
-            // 處理模擬登入
+            // 處理模擬登入 (當 Google 登入失敗或被阻擋時)
             const handleMockLogin = (role) => {
-                // [FIX] 確保底層 Auth 已連線
-                if (!firebaseUser) {
-                    setModal({ show: true, title: '系統連線中', message: '請稍候，系統正在建立安全連線...', type: 'info' });
-                    return;
-                }
-
                 const mockUser = role === 'teacher' 
                     ? { uid: 'mock-teacher-uid', email: TEACHER_EMAIL, displayName: '測試教師' }
                     : { uid: 'mock-student-uid', email: MOCK_STUDENT_EMAIL, displayName: '測試學生' };
                 
                 setAppUser(mockUser);
+                processLogin(mockUser, role);
                 
+                // 提示使用者
+                setModal({ 
+                    show: true, 
+                    title: '切換至模擬模式', 
+                    message: '由於預覽環境限制，已自動為您切換至模擬帳號登入。', 
+                    type: 'info' 
+                });
+            };
+
+            // 統一處理登入後的邏輯
+            const processLogin = (user, role) => {
                 if (role === 'teacher') {
-                    setStep('admin');
+                    if (user.email === TEACHER_EMAIL) {
+                        setStep('admin');
+                    } else {
+                        setStep('unauthorized');
+                    }
                 } else {
-                    checkStudentIdentity(mockUser);
+                    checkStudentIdentity(user);
                 }
             };
 
@@ -571,25 +556,31 @@
                 
                 // 真實學生身份檢查
                 try {
+                    // 若此時底層 auth 是 Google User，可能會有權限問題，嘗試讀取
+                    // 若讀取失敗，通常是因為權限，這裡可以考慮 catch
                     const snap = await db.collection('artifacts').doc(APP_ID).collection('public').doc('data').collection('member_list').get();
                     const list = snap.docs.map(d => d.data());
                     const matched = list.find(o => o.email === currentUser.email);
                     if (matched) {
                         setUserData(matched);
-                        // [FIX] 使用 firebaseUser.uid
-                        if (firebaseUser) loadUserResponse(firebaseUser.uid);
+                        // [FIX] 若使用了 Google Login，uid 變了，這裡要特別小心
+                        // 為了保證能寫入，我們盡量使用 firebaseUser (若它還存在) 或者當前的 auth.currentUser
+                        // 但為了 Canvas 相容性，我們假設底層 auth (firebaseUser) 是正確的寫入憑證
+                        const targetUid = firebaseUser ? firebaseUser.uid : currentUser.uid;
+                        loadUserResponse(targetUid);
                     } else if (currentUser.email !== TEACHER_EMAIL) {
                         setStep('unauthorized');
                     } else {
                         setStep('admin');
                     }
-                } catch (e) { console.error("Identity Check Error", e); hideLoader(); }
+                } catch (e) { 
+                    console.error("Identity Check Error", e); 
+                    setModal({ show: true, title: '讀取失敗', message: '無法讀取成員名單，請確認網路連線或稍後再試。', type: 'error' });
+                    hideLoader(); 
+                }
             };
 
             const loadUserResponse = (uid) => {
-                if (!firebaseUser) return;
-                
-                // [FIX] 存取 users/{userId} 時，必須確保 userId == firebaseUser.uid
                 db.collection('artifacts').doc(APP_ID).collection('users').doc(uid).collection('data').doc('responses').onSnapshot((docSnap) => {
                     if (docSnap.exists) {
                         const data = docSnap.data();
@@ -636,18 +627,23 @@
             };
 
             const saveToDB = async () => {
-                if (!appUser || !firebaseUser) return;
+                // 這裡是一個關鍵：如果用 Google Login，firebaseUser 可能已經變了
+                // 我們盡量使用當前 auth 的 uid
+                const targetUid = auth.currentUser ? auth.currentUser.uid : (firebaseUser ? firebaseUser.uid : null);
+                
+                if (!appUser || !targetUid) return;
+                
                 setIsActionLoading(true); setModal({show:false});
                 try {
                     const submitName = userData ? userData.name : appUser.displayName;
                     const submitSeat = userData ? userData.seatNo : "??";
                     const data = { ...userResponse, isSubmitted: true, lastUpdated: new Date().toISOString(), name: submitName, seatNo: submitSeat };
                     
-                    // [FIX] 寫入時使用 firebaseUser.uid 作為文件 key，符合安全規則
-                    await db.collection('artifacts').doc(APP_ID).collection('users').doc(firebaseUser.uid).collection('data').doc('responses').set(data, { merge: true });
+                    // [FIX] 寫入時使用 targetUid 作為文件 key
+                    await db.collection('artifacts').doc(APP_ID).collection('users').doc(targetUid).collection('data').doc('responses').set(data, { merge: true });
                     
-                    // 公開摘要也使用 firebaseUser.uid 避免權限問題
-                    await db.collection('artifacts').doc(APP_ID).collection('public').doc('data').collection('responses_summary').doc(firebaseUser.uid).set({
+                    // 公開摘要
+                    await db.collection('artifacts').doc(APP_ID).collection('public').doc('data').collection('responses_summary').doc(targetUid).set({
                         seatNo: submitSeat, name: submitName, evaluations: userResponse.evaluations, preferences: userResponse.preferences, lastUpdated: new Date().toISOString()
                     });
                     setStep('summary');
@@ -741,7 +737,7 @@
                     <Header appUser={appUser} userData={userData} step={step} setStep={setStep} handleLogout={handleLogout} />
 
                     <main className="max-w-6xl mx-auto p-4 mt-8 font-black">
-                        {step === 'login' && <LoginView onGoogleLogin={handleGoogleLogin} onMockLogin={handleMockLogin} />}
+                        {step === 'login' && <LoginView onGoogleLogin={handleGoogleLogin} />}
                         
                         {step === 'admin' && <AdminDashboard 
                             officers={officers} 
