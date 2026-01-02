@@ -52,14 +52,11 @@
         // 1. 全域設定與常數 (Global Constants)
         // ==========================================
         
-        // [FIX] Canvas 環境自動適配
-        // 判斷是否在 Canvas 環境中運行，如果是，使用環境提供的 config 與 appId
         const isCanvasEnv = typeof __firebase_config !== 'undefined';
         
         const firebaseConfig = isCanvasEnv 
             ? JSON.parse(__firebase_config) 
             : {
-                // 這裡保留您原本的 Config，以便您複製到其他地方使用
                 apiKey: "AIzaSyDPue2Ac6K2QyZ3PI5gBAA9GcleCAlisNU",
                 authDomain: "classjob-1d8bb.firebaseapp.com",
                 projectId: "classjob-1d8bb",
@@ -68,7 +65,6 @@
                 appId: "1:646890596544:web:07400ac216069e2531e525"
             };
 
-        // [FIX] 確保 appId 正確，這對於 Firestore 路徑至關重要
         const APP_ID = (isCanvasEnv && typeof __app_id !== 'undefined') ? __app_id : "class-officer-system";
         
         if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
@@ -89,7 +85,6 @@
             { val: 3, line1: "主動積極", line2: "都按時完成", color: "bg-indigo-300", activeColor: "bg-indigo-800", textColor: "text-indigo-950", activeText: "text-white" }
         ];
 
-        // Utils
         const normalizeRole = (roleName) => roleName ? roleName.toString().replace(/\d+$/, '').trim() : "";
         const hideLoader = () => { const loader = document.getElementById('static-loader'); if(loader) loader.classList.add('hidden-loader'); };
         const { useState, useEffect, useMemo } = React;
@@ -121,16 +116,36 @@
             );
         };
 
-        // 敘獎建議名單 Modal
+        // [New] 登入方式選擇視窗
+        const LoginSelectionModal = ({ show, role, onClose, onChooseGoogle, onChooseMock }) => {
+            if (!show) return null;
+            const roleName = role === 'teacher' ? '教師' : '學生';
+            return (
+                <div className="fixed inset-0 bg-black/40 backdrop-blur-md flex items-center justify-center z-[100] p-4 text-center font-black">
+                    <div className="bg-white rounded-[2.5rem] shadow-2xl max-w-sm w-full border-4 border-white p-8">
+                        <h3 className="text-2xl mb-4 text-[#8799E8] font-black">登入方式選擇</h3>
+                        <p className="text-slate-500 mb-8 font-black">您要以什麼身分進入{roleName}介面？</p>
+                        <div className="flex flex-col gap-3">
+                            <button onClick={onChooseGoogle} className="w-full py-4 bg-white border-2 border-slate-100 rounded-2xl text-slate-600 font-black hover:bg-slate-50 hover:border-[#C7CEEA] transition-all flex items-center justify-center gap-2">
+                                <span className="text-lg">🇬</span> Google 帳號登入
+                            </button>
+                            <button onClick={onChooseMock} className="w-full py-4 bg-[#B5EAD7] text-emerald-800 rounded-2xl font-black shadow-lg hover:brightness-105 active:scale-95 transition-all flex items-center justify-center gap-2">
+                                <span className="text-lg">🎭</span> 模擬身份進入 (預覽用)
+                            </button>
+                        </div>
+                        <button onClick={onClose} className="mt-6 text-slate-300 text-sm font-bold underline hover:text-slate-400">取消</button>
+                    </div>
+                </div>
+            );
+        };
+
         const AwardModal = ({ show, onClose, awardList }) => {
             if (!show) return null;
-            
             const handleCopy = () => {
                 const t = awardList.map(a => `${a.seatNo}\t${a.name}\t${a.awardDesc}`).join("\n");
                 const el = document.createElement("textarea"); el.value = t; document.body.appendChild(el); el.select();
                 document.execCommand('copy'); document.body.removeChild(el); alert("已複製到剪貼簿！");
             };
-
             return (
                 <div className="fixed inset-0 bg-black/40 backdrop-blur-md flex items-center justify-center z-[100] p-4 font-black text-black">
                     <div className="bg-white rounded-[3rem] shadow-2xl max-w-3xl w-full border-4 border-white max-h-[85vh] flex flex-col">
@@ -158,7 +173,6 @@
             );
         };
 
-        // Header Component
         const Header = ({ appUser, userData, step, setStep, handleLogout }) => (
             <header className="bg-white/80 backdrop-blur-md sticky top-0 z-50 border-b border-white h-24 sm:h-20 shadow-sm overflow-hidden">
                 <div className="max-w-[1400px] mx-auto h-full flex items-center px-6 relative">
@@ -185,18 +199,17 @@
         // 3. 功能頁面模組 (Functional Modules)
         // ==========================================
 
-        // [Module] Login View (Smart Login)
-        const LoginView = ({ onGoogleLogin }) => (
+        const LoginView = ({ onLoginClick }) => (
             <div className="flex flex-col md:flex-row gap-12 justify-center mt-12 animate-in fade-in max-w-4xl mx-auto">
                 <div className="login-card flex-1 bg-white p-12 rounded-[4rem] shadow-xl border-t-8 border-[#C7CEEA] text-center flex flex-col">
                     <div className="text-7xl mb-8">🎒</div><h2 className="text-4xl font-black text-slate-800 mb-6">學生入口</h2>
-                    <button onClick={() => onGoogleLogin('student')} className="w-full bg-[#C7CEEA] text-white py-6 rounded-3xl font-black shadow-lg text-xl mb-4 transition hover:brightness-105 active:scale-95">學生登入 (Google)</button>
-                    <p className="text-xs text-slate-400">使用 Google 帳號驗證身分</p>
+                    <button onClick={() => onLoginClick('student')} className="w-full bg-[#C7CEEA] text-white py-6 rounded-3xl font-black shadow-lg text-xl mb-4 transition hover:brightness-105 active:scale-95">學生登入</button>
+                    <p className="text-xs text-slate-400">點擊選擇登入方式</p>
                 </div>
                 <div className="login-card flex-1 bg-white p-12 rounded-[4rem] shadow-xl border-t-8 border-[#B5EAD7] text-center flex flex-col">
                     <div className="text-7xl mb-8 font-black">👩‍🏫</div><h2 className="text-4xl font-black text-slate-800 mb-6">教師入口</h2>
-                    <button onClick={() => onGoogleLogin('teacher')} className="w-full bg-[#B5EAD7] text-emerald-800 py-6 rounded-3xl font-black shadow-lg text-xl mb-4 transition hover:brightness-105 active:scale-95">教師登入 (Google)</button>
-                    <p className="text-xs text-slate-400">使用 Google 帳號進行管理</p>
+                    <button onClick={() => onLoginClick('teacher')} className="w-full bg-[#B5EAD7] text-emerald-800 py-6 rounded-3xl font-black shadow-lg text-xl mb-4 transition hover:brightness-105 active:scale-95">教師登入</button>
+                    <p className="text-xs text-slate-400">點擊選擇登入方式</p>
                 </div>
             </div>
         );
@@ -235,7 +248,7 @@
             </div>
         );
 
-        // [Module] Student Preference View (Contains Drag & Drop Logic)
+        // [Module] Student Preference View
         const StudentPrefView = ({ availableRoles, preferences, onUpdatePreferences, onFinish }) => {
             const [draggedItem, setDraggedItem] = useState(null);
 
@@ -313,7 +326,7 @@
             </div>
         );
 
-        // [Module] Admin Dashboard & Sub-modules
+        // [Module] Admin Dashboard
         const AdminDashboard = ({ 
             officers, allStudentResponses, ratingStats, volunteerStats, 
             onGoToSimulate, onSaveList, 
@@ -325,7 +338,6 @@
             const [topNFilter, setTopNFilter] = useState(3);
             const [showAwardModal, setShowAwardModal] = useState(false);
 
-            // Init edit list
             useEffect(() => {
                 if (editList.length === 0 && officers.length > 0) {
                     setEditList(officers.map(item => ({ seatNo: item.seatNo, role: item.originalRole || item.role, name: item.name, email: item.email || "" })));
@@ -360,7 +372,7 @@
                     </div>
 
                     <div className="bg-white p-8 rounded-[4rem] border-4 border-white shadow-sm min-h-[400px]">
-                        {/* Tab 1: List Management */}
+                        {/* Tab Content */}
                         {adminTab === 'list' && (
                             <div className="font-black text-black">
                                 <div className="flex justify-between items-center mb-6 font-black"><h3 className="text-2xl font-black">名單管理</h3><button onClick={() => setIsAdminMode(isAdminMode==='manual'?'paste':'manual')} className="text-xs font-bold text-indigo-400 underline">{isAdminMode==='manual'?'切換匯入模式':'切換手動編輯'}</button></div>
@@ -370,8 +382,6 @@
                                 <button onClick={() => onSaveList(isAdminMode, pasteContent, editList, setEditList, setAdminTab, setIsAdminMode)} className="w-full bg-[#B5EAD7] text-emerald-800 py-5 rounded-3xl font-black mt-6 shadow-lg active:scale-95 transition-all">儲存並重整系統</button>
                             </div>
                         )}
-                        
-                        {/* Tab 2: Progress */}
                         {adminTab === 'progress' && (
                             <div className="overflow-x-auto"><table className="w-full text-left font-black border-separate border-spacing-y-2"><thead><tr className="text-slate-400 text-xs"><th>座號</th><th>姓名</th><th className="text-center font-black">狀態</th><th className="text-right pr-4 font-black">最後同步</th></tr></thead><tbody>
                                 {officers.map(s => {
@@ -382,8 +392,6 @@
                                 })}
                             </tbody></table></div>
                         )}
-
-                        {/* Tab 3: Ratings */}
                         {adminTab === 'ratings' && (
                             <div className="space-y-6">
                                 <div className="flex justify-end mb-4"><button onClick={() => setShowAwardModal(true)} className="px-8 py-3 bg-rose-500 text-white rounded-2xl shadow-lg font-black">🎖️ 查看敘獎建議名單</button></div>
@@ -392,8 +400,6 @@
                                 </div>
                             </div>
                         )}
-
-                        {/* Tab 4: Volunteers */}
                         {adminTab === 'volunteers' && (
                             <div className="space-y-8 animate-in fade-in font-black text-black">
                                 <div className="flex flex-col sm:flex-row justify-between items-center bg-[#FFFAF0] p-6 rounded-[2.5rem] border-2 gap-4">
@@ -416,13 +422,13 @@
         // 4. Main App Controller
         // ==========================================
         function App() {
-            // [FIX] 分離底層 Firebase User (權限用) 與 應用層 App User (顯示邏輯用)
-            const [firebaseUser, setFirebaseUser] = useState(null); // 用於通過 Firestore Security Rules
-            const [appUser, setAppUser] = useState(null);           // 用於判斷老師/學生邏輯
+            const [firebaseUser, setFirebaseUser] = useState(null); 
+            const [appUser, setAppUser] = useState(null);           
             
             const [userData, setUserData] = useState(null);
             const [step, setStep] = useState('login'); 
             const [modal, setModal] = useState({ show: false, title: '', message: '', type: 'info', onConfirm: null });
+            const [loginSelection, setLoginSelection] = useState({ show: false, role: null }); // New: Login selection state
             const [isActionLoading, setIsActionLoading] = useState(false);
             const [validationErrors, setValidationErrors] = useState([]); 
             const [refreshTick, setRefreshTick] = useState(0);
@@ -431,7 +437,7 @@
             const [userResponse, setUserResponse] = useState({ evaluations: {}, preferences: Array(16).fill(null) });
             const [allStudentResponses, setAllStudentResponses] = useState([]);
 
-            // [FIX] 初始化 Auth，解決 Permission Denied 問題
+            // [FIX] Initialize Auth
             useEffect(() => {
                 const initAuth = async () => {
                     if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
@@ -443,23 +449,20 @@
                 initAuth();
 
                 const unsubscribe = auth.onAuthStateChanged((user) => {
-                    setFirebaseUser(user); // 這裡只設定底層 User，不觸發 App 邏輯
+                    setFirebaseUser(user); 
                     hideLoader();
                 });
                 return () => unsubscribe();
             }, []);
 
-            // 系統時鐘 Tick
             useEffect(() => {
                 const interval = setInterval(() => setRefreshTick(p => p + 1), 10000);
                 return () => clearInterval(interval);
             }, []);
 
-            // [FIX] 資料監聽：只有在 firebaseUser 存在時才啟動，避免 Permission Denied
-            // 讀取名單
+            // [FIX] Data Listeners
             useEffect(() => {
-                if (!firebaseUser) return; // 關鍵防護：沒權限時不讀取
-
+                if (!firebaseUser) return;
                 const unsub = db.collection('artifacts').doc(APP_ID).collection('public').doc('data').collection('member_list').onSnapshot((snapshot) => {
                     if (!snapshot.empty) {
                         const data = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
@@ -468,71 +471,65 @@
                     } else {
                         setOfficers([]);
                     }
-                }, (error) => {
-                    console.error("Error fetching members:", error);
-                });
+                }, (error) => console.error("Error fetching members:", error));
                 return () => unsub();
             }, [firebaseUser]);
 
-            // [FIX] 資料監聽：讀取回應
             useEffect(() => {
-                if (!firebaseUser) return; // 關鍵防護
-
+                if (!firebaseUser) return;
                 const unsub = db.collection('artifacts').doc(APP_ID).collection('public').doc('data').collection('responses_summary').onSnapshot((snap) => {
                     if (!snap.empty) {
                         setAllStudentResponses(snap.docs.map(d => ({ uid: d.id, ...d.data() })));
                     } else {
                         setAllStudentResponses([]);
                     }
-                }, (error) => {
-                    console.error("Error fetching responses:", error);
-                });
+                }, (error) => console.error("Error fetching responses:", error));
                 return () => unsub();
             }, [firebaseUser, refreshTick]);
 
-            // [FIX] 處理登入：結合真實 Google 登入與模擬登入 Fallback
+            // [NEW] Open Login Selection
+            const handleLoginClick = (role) => {
+                setLoginSelection({ show: true, role });
+            };
+
+            // Login Logic
             const handleGoogleLogin = async (role) => {
-                // 如果底層還沒準備好，先嘗試初始化（但不阻擋 UI）
+                // Ensure underlying auth is ready
                 if (!firebaseUser) {
-                    try { await auth.signInAnonymously(); } catch(e) { console.warn("Auto-auth failed", e); }
+                    setModal({ show: true, title: '系統連線中', message: '請稍候，系統正在建立安全連線...', type: 'info' });
+                    return;
                 }
 
                 try {
                     const provider = new firebase.auth.GoogleAuthProvider();
-                    // 嘗試彈出視窗
                     const result = await auth.signInWithPopup(provider);
                     const user = result.user;
                     setAppUser(user);
-
-                    // 登入成功後的路由邏輯
                     processLogin(user, role);
-
                 } catch (error) {
-                    console.warn("Google Sign-In failed or popup blocked, falling back to Mock Mode.", error);
-                    // Fallback: 模擬登入
-                    handleMockLogin(role);
+                    console.warn("Google Login Error:", error);
+                    setModal({ 
+                        show: true, 
+                        title: 'Google 登入失敗', 
+                        message: '無法開啟登入視窗（可能被瀏覽器阻擋）。請改用「模擬身份」進入。', 
+                        type: 'error' 
+                    });
                 }
             };
 
-            // 處理模擬登入 (當 Google 登入失敗或被阻擋時)
             const handleMockLogin = (role) => {
+                if (!firebaseUser) {
+                    setModal({ show: true, title: '系統連線中', message: '請稍候，系統正在建立安全連線...', type: 'info' });
+                    return;
+                }
                 const mockUser = role === 'teacher' 
                     ? { uid: 'mock-teacher-uid', email: TEACHER_EMAIL, displayName: '測試教師' }
                     : { uid: 'mock-student-uid', email: MOCK_STUDENT_EMAIL, displayName: '測試學生' };
                 
                 setAppUser(mockUser);
                 processLogin(mockUser, role);
-                
-                // 提示使用者
-                setModal({ 
-                    show: true, 
-                    title: '切換至模擬模式', 
-                    message: '由於預覽環境限制，已自動為您切換至模擬帳號登入。', 
-                    type: 'info' 
-                });
             };
 
-            // 統一處理登入後的邏輯
             const processLogin = (user, role) => {
                 if (role === 'teacher') {
                     if (user.email === TEACHER_EMAIL) {
@@ -546,26 +543,17 @@
             };
 
             const checkStudentIdentity = async (currentUser) => {
-                // 特殊處理：模擬學生
                 if (currentUser.email === MOCK_STUDENT_EMAIL) {
                     setUserData({ seatNo: "99", name: "測試生", email: MOCK_STUDENT_EMAIL });
-                    // [FIX] 使用 firebaseUser.uid 確保符合安全規則
                     if (firebaseUser) loadUserResponse(firebaseUser.uid);
                     return;
                 }
-                
-                // 真實學生身份檢查
                 try {
-                    // 若此時底層 auth 是 Google User，可能會有權限問題，嘗試讀取
-                    // 若讀取失敗，通常是因為權限，這裡可以考慮 catch
                     const snap = await db.collection('artifacts').doc(APP_ID).collection('public').doc('data').collection('member_list').get();
                     const list = snap.docs.map(d => d.data());
                     const matched = list.find(o => o.email === currentUser.email);
                     if (matched) {
                         setUserData(matched);
-                        // [FIX] 若使用了 Google Login，uid 變了，這裡要特別小心
-                        // 為了保證能寫入，我們盡量使用 firebaseUser (若它還存在) 或者當前的 auth.currentUser
-                        // 但為了 Canvas 相容性，我們假設底層 auth (firebaseUser) 是正確的寫入憑證
                         const targetUid = firebaseUser ? firebaseUser.uid : currentUser.uid;
                         loadUserResponse(targetUid);
                     } else if (currentUser.email !== TEACHER_EMAIL) {
@@ -594,17 +582,11 @@
                     } else if (step === 'login' || step === 'unauthorized') {
                         setStep('eval');
                     }
-                }, (error) => {
-                    // 忽略權限錯誤，避免 console 刷屏
-                    if (error.code !== 'permission-denied') console.error("Error loading user response:", error);
-                });
+                }, (error) => { if (error.code !== 'permission-denied') console.error("Error loading user response:", error); });
             };
 
             const handleLogout = () => { 
-                // 只登出應用層身份，底層 Firebase Auth 保持連線以維持資料讀取權限
-                setStep('login'); 
-                setUserData(null); 
-                setAppUser(null);
+                setStep('login'); setUserData(null); setAppUser(null);
             };
 
             const handleEvalFinish = () => {
@@ -627,22 +609,14 @@
             };
 
             const saveToDB = async () => {
-                // 這裡是一個關鍵：如果用 Google Login，firebaseUser 可能已經變了
-                // 我們盡量使用當前 auth 的 uid
                 const targetUid = auth.currentUser ? auth.currentUser.uid : (firebaseUser ? firebaseUser.uid : null);
-                
                 if (!appUser || !targetUid) return;
-                
                 setIsActionLoading(true); setModal({show:false});
                 try {
                     const submitName = userData ? userData.name : appUser.displayName;
                     const submitSeat = userData ? userData.seatNo : "??";
                     const data = { ...userResponse, isSubmitted: true, lastUpdated: new Date().toISOString(), name: submitName, seatNo: submitSeat };
-                    
-                    // [FIX] 寫入時使用 targetUid 作為文件 key
                     await db.collection('artifacts').doc(APP_ID).collection('users').doc(targetUid).collection('data').doc('responses').set(data, { merge: true });
-                    
-                    // 公開摘要
                     await db.collection('artifacts').doc(APP_ID).collection('public').doc('data').collection('responses_summary').doc(targetUid).set({
                         seatNo: submitSeat, name: submitName, evaluations: userResponse.evaluations, preferences: userResponse.preferences, lastUpdated: new Date().toISOString()
                     });
@@ -675,16 +649,13 @@
                 } catch (err) { console.error(err); } finally { setIsActionLoading(false); }
             };
 
-            // Calculated Props (Memoized)
             const availableRoles = useMemo(() => ROLE_ORDER.filter(r => !(userResponse.preferences || []).includes(r)), [userResponse.preferences]);
-            
             const officersSortedByRole = useMemo(() => [...officers].sort((a, b) => {
                 const idxA = ROLE_ORDER.indexOf(normalizeRole(a.role));
                 const idxB = ROLE_ORDER.indexOf(normalizeRole(b.role));
                 if (idxA !== idxB) return idxA - idxB;
                 return Number(a.seatNo) - Number(b.seatNo);
             }), [officers]);
-
             const ratingStats = useMemo(() => {
                 const stats = {};
                 officers.forEach(off => { stats[String(off.seatNo)] = { name: off.name, role: off.role, seatNo: off.seatNo, counts: { "-1": 0, "0": 0, "1": 0, "2": 0, "3": 0 } }; });
@@ -695,7 +666,6 @@
                 });
                 return stats;
             }, [allStudentResponses, officers]);
-
             const volunteerStats = useMemo(() => {
                 const stats = {}; ROLE_ORDER.forEach(role => stats[role] = []);
                 allStudentResponses.forEach(resp => {
@@ -703,7 +673,6 @@
                 });
                 return stats;
             }, [allStudentResponses]);
-
             const statistics = useMemo(() => {
                 let incEval = 0, incPref = 0;
                 const validOfficers = officers.filter(o => o.name && o.role);
@@ -734,10 +703,25 @@
                         onClose={() => setModal({ ...modal, show: false })} 
                     />
 
+                    {/* [NEW] Login Selection Modal */}
+                    <LoginSelectionModal
+                        show={loginSelection.show}
+                        role={loginSelection.role}
+                        onClose={() => setLoginSelection({ show: false, role: null })}
+                        onChooseGoogle={() => {
+                            setLoginSelection({ show: false, role: null });
+                            handleGoogleLogin(loginSelection.role);
+                        }}
+                        onChooseMock={() => {
+                            setLoginSelection({ show: false, role: null });
+                            handleMockLogin(loginSelection.role);
+                        }}
+                    />
+
                     <Header appUser={appUser} userData={userData} step={step} setStep={setStep} handleLogout={handleLogout} />
 
                     <main className="max-w-6xl mx-auto p-4 mt-8 font-black">
-                        {step === 'login' && <LoginView onGoogleLogin={handleGoogleLogin} />}
+                        {step === 'login' && <LoginView onLoginClick={handleLoginClick} />}
                         
                         {step === 'admin' && <AdminDashboard 
                             officers={officers} 
