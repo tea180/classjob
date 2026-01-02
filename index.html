@@ -116,7 +116,7 @@
             );
         };
 
-        // [New] 登入方式選擇視窗
+        // 登入方式選擇視窗
         const LoginSelectionModal = ({ show, role, onClose, onChooseGoogle, onChooseMock }) => {
             if (!show) return null;
             const roleName = role === 'teacher' ? '教師' : '學生';
@@ -494,12 +494,7 @@
 
             // Login Logic
             const handleGoogleLogin = async (role) => {
-                // Ensure underlying auth is ready
-                if (!firebaseUser) {
-                    setModal({ show: true, title: '系統連線中', message: '請稍候，系統正在建立安全連線...', type: 'info' });
-                    return;
-                }
-
+                // REMOVE blocking check to allow popup to trigger
                 try {
                     const provider = new firebase.auth.GoogleAuthProvider();
                     const result = await auth.signInWithPopup(provider);
@@ -517,11 +512,12 @@
                 }
             };
 
-            const handleMockLogin = (role) => {
+            const handleMockLogin = async (role) => {
+                // Ensure auth for Mock login reading
                 if (!firebaseUser) {
-                    setModal({ show: true, title: '系統連線中', message: '請稍候，系統正在建立安全連線...', type: 'info' });
-                    return;
+                    try { await auth.signInAnonymously(); } catch(e) {}
                 }
+                
                 const mockUser = role === 'teacher' 
                     ? { uid: 'mock-teacher-uid', email: TEACHER_EMAIL, displayName: '測試教師' }
                     : { uid: 'mock-student-uid', email: MOCK_STUDENT_EMAIL, displayName: '測試學生' };
@@ -545,7 +541,9 @@
             const checkStudentIdentity = async (currentUser) => {
                 if (currentUser.email === MOCK_STUDENT_EMAIL) {
                     setUserData({ seatNo: "99", name: "測試生", email: MOCK_STUDENT_EMAIL });
-                    if (firebaseUser) loadUserResponse(firebaseUser.uid);
+                    // Try to load response if auth is ready, otherwise listener will pick up
+                    const uid = firebaseUser ? firebaseUser.uid : null;
+                    if(uid) loadUserResponse(uid);
                     return;
                 }
                 try {
@@ -554,6 +552,7 @@
                     const matched = list.find(o => o.email === currentUser.email);
                     if (matched) {
                         setUserData(matched);
+                        // Use firebaseUser.uid for safe writing if available
                         const targetUid = firebaseUser ? firebaseUser.uid : currentUser.uid;
                         loadUserResponse(targetUid);
                     } else if (currentUser.email !== TEACHER_EMAIL) {
