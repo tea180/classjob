@@ -185,18 +185,26 @@
         // 3. 功能頁面模組 (Functional Modules)
         // ==========================================
 
-        // [Module] Login View
-        const LoginView = ({ onLogin }) => (
+        // [Module] Login View (Restored Google Login)
+        const LoginView = ({ onGoogleLogin, onMockLogin }) => (
             <div className="flex flex-col md:flex-row gap-12 justify-center mt-12 animate-in fade-in max-w-4xl mx-auto">
                 <div className="login-card flex-1 bg-white p-12 rounded-[4rem] shadow-xl border-t-8 border-[#C7CEEA] text-center flex flex-col">
                     <div className="text-7xl mb-8">🎒</div><h2 className="text-4xl font-black text-slate-800 mb-6">學生入口</h2>
-                    <button onClick={() => onLogin('student')} className="w-full bg-[#C7CEEA] text-white py-6 rounded-3xl font-black shadow-lg text-xl mb-4">學生登入</button>
-                    <p className="text-xs text-slate-400">預覽模式：無需密碼即可進入</p>
+                    <button onClick={() => onGoogleLogin('student')} className="w-full bg-[#C7CEEA] text-white py-6 rounded-3xl font-black shadow-lg text-xl mb-4">學生登入 (Google)</button>
+                    
+                    <div className="mt-auto pt-4 border-t border-slate-100">
+                        <p className="text-xs text-slate-400 mb-2">預覽模式無法使用 Google 登入？</p>
+                        <button onClick={() => onMockLogin('student')} className="text-indigo-400 underline text-sm font-bold hover:text-indigo-600">使用模擬學生身分登入</button>
+                    </div>
                 </div>
                 <div className="login-card flex-1 bg-white p-12 rounded-[4rem] shadow-xl border-t-8 border-[#B5EAD7] text-center flex flex-col">
                     <div className="text-7xl mb-8 font-black">👩‍🏫</div><h2 className="text-4xl font-black text-slate-800 mb-6">教師入口</h2>
-                    <button onClick={() => onLogin('teacher')} className="w-full bg-[#B5EAD7] text-emerald-800 py-6 rounded-3xl font-black shadow-lg text-xl mb-4">教師管理</button>
-                    <p className="text-xs text-slate-400">預覽模式：無需密碼即可進入</p>
+                    <button onClick={() => onGoogleLogin('teacher')} className="w-full bg-[#B5EAD7] text-emerald-800 py-6 rounded-3xl font-black shadow-lg text-xl mb-4">教師登入 (Google)</button>
+                    
+                    <div className="mt-auto pt-4 border-t border-slate-100">
+                        <p className="text-xs text-slate-400 mb-2">預覽模式無法使用 Google 登入？</p>
+                        <button onClick={() => onMockLogin('teacher')} className="text-emerald-600 underline text-sm font-bold hover:text-emerald-800">使用模擬教師身分登入</button>
+                    </div>
                 </div>
             </div>
         );
@@ -456,6 +464,13 @@
                 return () => clearInterval(interval);
             }, []);
 
+            // [FIX] 監聽連線狀態，自動關閉連線中視窗
+            useEffect(() => {
+                if (firebaseUser && modal.title === '系統連線中') {
+                    setModal(prev => ({ ...prev, show: false }));
+                }
+            }, [firebaseUser, modal.title]);
+
             // [FIX] 資料監聽：只有在 firebaseUser 存在時才啟動，避免 Permission Denied
             // 讀取名單
             useEffect(() => {
@@ -491,10 +506,41 @@
                 return () => unsub();
             }, [firebaseUser, refreshTick]);
 
-            // 處理應用層登入 (模擬/預覽模式)
-            const handleLogin = (role) => {
-                // 在 Canvas 預覽中，直接模擬身份，不呼叫 Google Login
-                
+            // 處理真實 Google 登入
+            const handleGoogleLogin = async (role) => {
+                // [FIX] 確保底層 Auth 已連線
+                if (!firebaseUser) {
+                    setModal({ show: true, title: '系統連線中', message: '請稍候，系統正在建立安全連線...', type: 'info' });
+                    return;
+                }
+
+                try {
+                    const provider = new firebase.auth.GoogleAuthProvider();
+                    const result = await auth.signInWithPopup(provider);
+                    const user = result.user;
+                    setAppUser(user); // 設定應用層 User
+
+                    if (role === 'teacher') {
+                        if (user.email === TEACHER_EMAIL) {
+                            setStep('admin');
+                        } else {
+                            setStep('unauthorized');
+                        }
+                    } else {
+                        checkStudentIdentity(user);
+                    }
+                } catch (error) {
+                    setModal({ 
+                        show: true, 
+                        title: 'Google 登入失敗', 
+                        message: '無法開啟登入視窗。若您處於預覽環境，請改用下方的「模擬登入」功能。', 
+                        type: 'error' 
+                    });
+                }
+            };
+
+            // 處理模擬登入
+            const handleMockLogin = (role) => {
                 // [FIX] 確保底層 Auth 已連線
                 if (!firebaseUser) {
                     setModal({ show: true, title: '系統連線中', message: '請稍候，系統正在建立安全連線...', type: 'info' });
@@ -522,7 +568,22 @@
                     if (firebaseUser) loadUserResponse(firebaseUser.uid);
                     return;
                 }
-                // ... (保留原本邏輯，但在 Canvas 預覽中通常不會走到這)
+                
+                // 真實學生身份檢查
+                try {
+                    const snap = await db.collection('artifacts').doc(APP_ID).collection('public').doc('data').collection('member_list').get();
+                    const list = snap.docs.map(d => d.data());
+                    const matched = list.find(o => o.email === currentUser.email);
+                    if (matched) {
+                        setUserData(matched);
+                        // [FIX] 使用 firebaseUser.uid
+                        if (firebaseUser) loadUserResponse(firebaseUser.uid);
+                    } else if (currentUser.email !== TEACHER_EMAIL) {
+                        setStep('unauthorized');
+                    } else {
+                        setStep('admin');
+                    }
+                } catch (e) { console.error("Identity Check Error", e); hideLoader(); }
             };
 
             const loadUserResponse = (uid) => {
@@ -680,7 +741,7 @@
                     <Header appUser={appUser} userData={userData} step={step} setStep={setStep} handleLogout={handleLogout} />
 
                     <main className="max-w-6xl mx-auto p-4 mt-8 font-black">
-                        {step === 'login' && <LoginView onLogin={handleLogin} />}
+                        {step === 'login' && <LoginView onGoogleLogin={handleGoogleLogin} onMockLogin={handleMockLogin} />}
                         
                         {step === 'admin' && <AdminDashboard 
                             officers={officers} 
