@@ -93,23 +93,32 @@
         // 2. 共用 UI 元件 (Shared UI Components)
         // ==========================================
         
-        // 模態視窗 (Alert/Confirm)
-        const Modal = ({ show, title, message, type, onConfirm, onClose }) => {
+        // [Modified] 模態視窗 - 支援自定義按鈕 (Action Button)
+        const Modal = ({ show, title, message, type, onConfirm, onClose, actionButton }) => {
             if (!show) return null;
             return (
                 <div className="fixed inset-0 bg-black/20 backdrop-blur-sm flex items-center justify-center z-[100] p-4 text-center font-black">
                     <div className="bg-white rounded-[2.5rem] shadow-2xl max-w-sm w-full border-4 border-white p-6">
                         <h3 className={`text-2xl mb-2 ${type === 'error' ? 'text-rose-500' : 'text-[#8799E8]'}`}>{title}</h3>
                         <p className="text-slate-500 mb-6">{message}</p>
-                        <div className="flex gap-3">
-                            {onConfirm ? (
-                                <>
-                                    <button onClick={onClose} className="flex-1 py-3 bg-slate-100 rounded-2xl text-slate-400">取消</button>
-                                    <button onClick={onConfirm} className="flex-1 py-3 bg-[#B5EAD7] text-emerald-800 rounded-2xl">確定</button>
-                                </>
-                            ) : (
-                                <button onClick={onClose} className="w-full py-3 bg-[#C7CEEA] text-white rounded-2xl font-black">知道了</button>
+                        <div className="flex flex-col gap-2 w-full">
+                            {actionButton && (
+                                <button onClick={actionButton.onClick} className="w-full py-3 bg-[#C7CEEA] text-white rounded-2xl font-black shadow-md hover:brightness-105 active:scale-95 transition-all">
+                                    {actionButton.text}
+                                </button>
                             )}
+                            <div className="flex gap-3 w-full">
+                                {onConfirm ? (
+                                    <>
+                                        <button onClick={onClose} className="flex-1 py-3 bg-slate-100 rounded-2xl text-slate-400">取消</button>
+                                        <button onClick={onConfirm} className="flex-1 py-3 bg-[#B5EAD7] text-emerald-800 rounded-2xl">確定</button>
+                                    </>
+                                ) : (
+                                    <button onClick={onClose} className={`w-full py-3 rounded-2xl font-black ${actionButton ? 'bg-slate-100 text-slate-400' : 'bg-[#C7CEEA] text-white'}`}>
+                                        {actionButton ? '取消' : '知道了'}
+                                    </button>
+                                )}
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -427,8 +436,8 @@
             
             const [userData, setUserData] = useState(null);
             const [step, setStep] = useState('login'); 
-            const [modal, setModal] = useState({ show: false, title: '', message: '', type: 'info', onConfirm: null });
-            const [loginSelection, setLoginSelection] = useState({ show: false, role: null }); // New: Login selection state
+            const [modal, setModal] = useState({ show: false, title: '', message: '', type: 'info', onConfirm: null, actionButton: null });
+            const [loginSelection, setLoginSelection] = useState({ show: false, role: null }); 
             const [isActionLoading, setIsActionLoading] = useState(false);
             const [validationErrors, setValidationErrors] = useState([]); 
             const [refreshTick, setRefreshTick] = useState(0);
@@ -437,7 +446,6 @@
             const [userResponse, setUserResponse] = useState({ evaluations: {}, preferences: Array(16).fill(null) });
             const [allStudentResponses, setAllStudentResponses] = useState([]);
 
-            // [FIX] Initialize Auth
             useEffect(() => {
                 const initAuth = async () => {
                     if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
@@ -460,7 +468,6 @@
                 return () => clearInterval(interval);
             }, []);
 
-            // [FIX] Data Listeners
             useEffect(() => {
                 if (!firebaseUser) return;
                 const unsub = db.collection('artifacts').doc(APP_ID).collection('public').doc('data').collection('member_list').onSnapshot((snapshot) => {
@@ -487,16 +494,16 @@
                 return () => unsub();
             }, [firebaseUser, refreshTick]);
 
-            // [NEW] Open Login Selection
             const handleLoginClick = (role) => {
                 setLoginSelection({ show: true, role });
             };
 
-            // Login Logic
+            // [Modified] 
             const handleGoogleLogin = async (role) => {
-                // REMOVE blocking check to allow popup to trigger
+                // Remove blocking check to allow popup to trigger
                 try {
                     const provider = new firebase.auth.GoogleAuthProvider();
+                    provider.setCustomParameters({ prompt: 'select_account' });
                     const result = await auth.signInWithPopup(provider);
                     const user = result.user;
                     setAppUser(user);
@@ -505,9 +512,16 @@
                     console.warn("Google Login Error:", error);
                     setModal({ 
                         show: true, 
-                        title: 'Google 登入失敗', 
-                        message: '無法開啟登入視窗（可能被瀏覽器阻擋）。請改用「模擬身份」進入。', 
-                        type: 'error' 
+                        title: '登入受限', 
+                        message: '由於預覽環境的安全性限制，Google 登入視窗已被阻擋。您可以點擊下方按鈕切換至模擬身份繼續。', 
+                        type: 'error',
+                        actionButton: {
+                            text: '切換至模擬身份進入',
+                            onClick: () => {
+                                setModal({ show: false, title: '', message: '', type: 'info', actionButton: null });
+                                handleMockLogin(role);
+                            }
+                        }
                     });
                 }
             };
@@ -541,7 +555,6 @@
             const checkStudentIdentity = async (currentUser) => {
                 if (currentUser.email === MOCK_STUDENT_EMAIL) {
                     setUserData({ seatNo: "99", name: "測試生", email: MOCK_STUDENT_EMAIL });
-                    // Try to load response if auth is ready, otherwise listener will pick up
                     const uid = firebaseUser ? firebaseUser.uid : null;
                     if(uid) loadUserResponse(uid);
                     return;
@@ -552,7 +565,6 @@
                     const matched = list.find(o => o.email === currentUser.email);
                     if (matched) {
                         setUserData(matched);
-                        // Use firebaseUser.uid for safe writing if available
                         const targetUid = firebaseUser ? firebaseUser.uid : currentUser.uid;
                         loadUserResponse(targetUid);
                     } else if (currentUser.email !== TEACHER_EMAIL) {
@@ -700,6 +712,7 @@
                         type={modal.type} 
                         onConfirm={modal.onConfirm} 
                         onClose={() => setModal({ ...modal, show: false })} 
+                        actionButton={modal.actionButton}
                     />
 
                     {/* [NEW] Login Selection Modal */}
